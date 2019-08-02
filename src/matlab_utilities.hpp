@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fast_math.hpp"
 #include "tensors.hpp"
 #include <algorithm>
 #include <functional>
@@ -135,9 +136,6 @@ fk::matrix<P> horz_matrix_concat(std::vector<fk::matrix<P>> const matrices);
 // limited subset of matbal meshgrid
 fk::matrix<int> meshgrid(int const start, int const length);
 
-// a non-matlab one-liner that had no better home - compute 2^arg
-inline int two_raised_to(int exponent) { return 1 << exponent; }
-
 // suppress implicit instantiations
 extern template fk::vector<float> linspace(float const start, float const end,
                                            unsigned int const num_elems = 100);
@@ -174,3 +172,13 @@ extern template fk::matrix<float>
 horz_matrix_concat(std::vector<fk::matrix<float>> const matrices);
 extern template fk::matrix<double>
 horz_matrix_concat(std::vector<fk::matrix<double>> const matrices);
+
+template<typename P, mem_type mem>
+fk::matrix<P> reshape(fk::matrix<P, mem> mat, int const nrow, int const ncol);
+
+extern template fk::matrix<double>
+reshape(fk::matrix<double> mat, int const nrow, int const ncol);
+extern template fk::matrix<float>
+reshape(fk::matrix<float> mat, int const nrow, int const ncol);
+extern template fk::matrix<int>
+reshape(fk::matrix<int> mat, int const nrow, int const ncol);

@@ -1,5 +1,6 @@
 #include "basis.hpp"
 
+#include "fast_math.hpp"
 #include "matlab_utilities.hpp"
 #include "quadrature.hpp"
 #include "tensors.hpp"
@@ -34,7 +35,7 @@ std::array<fk::matrix<P>, 6> generate_multi_wavelets(int const degree)
   // Negative one to zero --zero to one -- and negative one to one
   // since this is done on the "reference element" -1 to 1
   // the intervals are fixed to be (-1,0), (0,1), and (-1,1)
-  int const stepping = two_raised_to(6);
+  int const stepping = fm::two_raised_to(6);
   P const neg1       = -1.0;
   P const zero       = 0.0;
   P const one        = 1.0;
@@ -366,7 +367,7 @@ fk::matrix<R> operator_two_scale(int const degree, int const num_levels)
   assert(degree > 0);
   assert(num_levels > 0);
 
-  int const max_level = two_raised_to(num_levels);
+  int const max_level = fm::two_raised_to(num_levels);
 
   // this is to get around unused warnings
   // because can't unpack only some args w structured binding (until c++20)
@@ -405,7 +406,7 @@ fk::matrix<R> operator_two_scale(int const degree, int const num_levels)
     }
     else
     {
-      int const cn = two_raised_to(n - j + 1.0) * degree;
+      int const cn = fm::two_raised_to(n - j + 1.0) * degree;
 
       std::fill(cfmwt.begin(), cfmwt.end(), 0.0);
       cfmwt.set_submatrix(cn, cn, eye<R>(degree * max_level - cn));
@@ -423,6 +424,184 @@ fk::matrix<R> operator_two_scale(int const degree, int const num_levels)
   return fmwt_comp;
 }
 
+/*
+ * the general implementation of apply_fmwt(). Users access it through the
+ * helpers at the bottom of the file (and as defined in the header file)
+ */
+template<typename P>
+fk::matrix<P>
+apply_fmwt(fk::matrix<P> const &fmwt, fk::matrix<P> const &coefficient_matrix,
+           int const kdegree, int const num_levels, bool const fmwt_left,
+           bool const fmwt_trans)
+{
+  int const n_col = kdegree * pow(2, num_levels);
+  fk::matrix<P> product(n_col, n_col);
+  int row_start = 0;
+  int row_end   = 2 * kdegree - 1;
+  int col_start = 0;
+  int col_end   = n_col - 1;
+  if (fmwt_left)
+  {
+    if (fmwt_trans)
+    {
+      fk::matrix<P> const fmwt_sub1 =
+          fmwt.extract_submatrix(row_start, col_start, row_end - row_start + 1,
+                                 col_end - col_start + 1);
+      fk::matrix<P> const fmwt_sub1t = fk::matrix<P>(fmwt_sub1).transpose();
+      fk::matrix<P> const partial_product1 =
+          fmwt_sub1t * coefficient_matrix.extract_submatrix(
+                           row_start, 0, row_end - row_start + 1, n_col);
+      product.set_submatrix(col_start, 0, partial_product1);
+    }
+    else
+    {
+      fk::matrix<P> const partial_product1 =
+          fmwt.extract_submatrix(row_start, col_start, row_end - row_start + 1,
+                                 col_end - col_start + 1) *
+          coefficient_matrix.extract_submatrix(col_start, 0,
+                                               col_end - col_start + 1, n_col);
+      product.set_submatrix(row_start, 0, partial_product1);
+    }
+  }
+  else
+  {
+    if (fmwt_trans)
+    {
+      fk::matrix<P> const fmwt_sub1 =
+          fmwt.extract_submatrix(row_start, col_start, row_end - row_start + 1,
+                                 col_end - col_start + 1);
+      fk::matrix<P> const fmwt_sub1t = fk::matrix<P>(fmwt_sub1).transpose();
+      fk::matrix<P> const partial_product1 =
+          coefficient_matrix.extract_submatrix(0, col_start, n_col,
+                                               col_end - col_start + 1) *
+          fmwt_sub1t;
+      product.set_submatrix(row_start, 0, partial_product1);
+    }
+    else
+    {
+      fk::matrix<P> const partial_product1 =
+          coefficient_matrix.extract_submatrix(0, row_start, n_col,
+                                               row_end - row_start + 1) *
+          fmwt.extract_submatrix(row_start, col_start, row_end - row_start + 1,
+                                 col_end - col_start + 1);
+      product.set_submatrix(row_start, 0, partial_product1);
+    }
+  }
+
+  row_start = 2 * kdegree;
+  for (int i_lev = 1; i_lev < num_levels; i_lev++)
+  {
+    int ncells = pow(2, i_lev);
+    int isize  = n_col / ncells;
+
+    for (int icell = 0; icell < ncells; icell++)
+    {
+      row_end   = row_start + kdegree - 1;
+      col_start = icell * isize;
+      col_end   = col_start + isize - 1;
+      if (fmwt_left)
+      {
+        if (fmwt_trans)
+        {
+          fk::matrix<P> const fmwt_sub1 = fmwt.extract_submatrix(
+              row_start, col_start, row_end - row_start + 1,
+              col_end - col_start + 1);
+          fk::matrix<P> const fmwt_sub1t = fk::matrix<P>(fmwt_sub1).transpose();
+          product.set_submatrix(
+              col_start, 0,
+              product.extract_submatrix(col_start, 0, col_end - col_start + 1,
+                                        n_col) +
+                  fmwt_sub1t *
+                      coefficient_matrix.extract_submatrix(
+                          row_start, 0, row_end - row_start + 1, n_col));
+        }
+        else
+        {
+          product.set_submatrix(
+              row_start, 0,
+              product.extract_submatrix(row_start, 0, row_end - row_start + 1,
+                                        n_col) +
+                  fmwt.extract_submatrix(row_start, col_start,
+                                         row_end - row_start + 1,
+                                         col_end - col_start + 1) *
+                      coefficient_matrix.extract_submatrix(
+                          col_start, 0, col_end - col_start + 1, n_col));
+        }
+      }
+      else
+      {
+        if (fmwt_trans)
+        {
+          fk::matrix<P> fmwt_sub1 = fmwt.extract_submatrix(
+              row_start, col_start, row_end - row_start + 1,
+              col_end - col_start + 1);
+          product.set_submatrix(
+              0, row_start,
+              product.extract_submatrix(0, row_start, n_col,
+                                        row_end - row_start + 1) +
+                  coefficient_matrix.extract_submatrix(
+                      0, col_start, n_col, col_end - col_start + 1) *
+                      fmwt_sub1.transpose());
+        }
+        else
+        {
+          product.set_submatrix(
+              0, col_start,
+              product.extract_submatrix(0, col_start, n_col,
+                                        col_end - col_start + 1) +
+                  coefficient_matrix.extract_submatrix(
+                      0, row_start, n_col, row_end - row_start + 1) *
+                      fmwt.extract_submatrix(row_start, col_start,
+                                             row_end - row_start + 1,
+                                             col_end - col_start + 1));
+        }
+      }
+
+      row_start = row_end + 1;
+    }
+  }
+
+  return product;
+}
+
+/*
+ * These are the user-facing functions for apply_fmwt()
+ */
+template<typename P>
+fk::matrix<P> apply_left_fmwt(fk::matrix<P> const &fmwt,
+                              fk::matrix<P> const &coefficient_matrix,
+                              int const kdegree, int const num_levels)
+{
+  return apply_fmwt(fmwt, coefficient_matrix, kdegree, num_levels, true, false);
+}
+
+template<typename P>
+fk::matrix<P> apply_right_fmwt(fk::matrix<P> const &fmwt,
+                               fk::matrix<P> const &coefficient_matrix,
+                               int const kdegree, int const num_levels)
+{
+  return apply_fmwt(fmwt, coefficient_matrix, kdegree, num_levels, false,
+                    false);
+}
+
+template<typename P>
+fk::matrix<P>
+apply_left_fmwt_transposed(fk::matrix<P> const &fmwt,
+                           fk::matrix<P> const &coefficient_matrix,
+                           int const kdegree, int const num_levels)
+{
+  return apply_fmwt(fmwt, coefficient_matrix, kdegree, num_levels, true, true);
+}
+
+template<typename P>
+fk::matrix<P>
+apply_right_fmwt_transposed(fk::matrix<P> const &fmwt,
+                            fk::matrix<P> const &coefficient_matrix,
+                            int const kdegree, int const num_levels)
+{
+  return apply_fmwt(fmwt, coefficient_matrix, kdegree, num_levels, false, true);
+}
+
 template std::array<fk::matrix<double>, 6>
 generate_multi_wavelets(int const degree);
 template std::array<fk::matrix<float>, 6>
@@ -432,3 +611,39 @@ template fk::matrix<double>
 operator_two_scale(int const degree, int const num_levels);
 template fk::matrix<float>
 operator_two_scale(int const degree, int const num_levels);
+
+template fk::matrix<double>
+apply_left_fmwt(fk::matrix<double> const &fmwt,
+                fk::matrix<double> const &coefficient_matrix, int const kdeg,
+                int const num_levels);
+template fk::matrix<float>
+apply_left_fmwt(fk::matrix<float> const &fmwt,
+                fk::matrix<float> const &coefficient_matrix, int const kdeg,
+                int const num_levels);
+
+template fk::matrix<double>
+apply_left_fmwt_transposed(fk::matrix<double> const &fmwt,
+                           fk::matrix<double> const &coefficient_matrix,
+                           int const kdeg, int const num_levels);
+template fk::matrix<float>
+apply_left_fmwt_transposed(fk::matrix<float> const &fmwt,
+                           fk::matrix<float> const &coefficient_matrix,
+                           int const kdeg, int const num_levels);
+
+template fk::matrix<double>
+apply_right_fmwt(fk::matrix<double> const &fmwt,
+                 fk::matrix<double> const &coefficient_matrix, int const kdeg,
+                 int const num_levels);
+template fk::matrix<float>
+apply_right_fmwt(fk::matrix<float> const &fmwt,
+                 fk::matrix<float> const &coefficient_matrix, int const kdeg,
+                 int const num_levels);
+
+template fk::matrix<double>
+apply_right_fmwt_transposed(fk::matrix<double> const &fmwt,
+                            fk::matrix<double> const &coefficient_matrix,
+                            int const kdeg, int const num_levels);
+template fk::matrix<float>
+apply_right_fmwt_transposed(fk::matrix<float> const &fmwt,
+                            fk::matrix<float> const &coefficient_matrix,
+                            int const kdeg, int const num_levels);

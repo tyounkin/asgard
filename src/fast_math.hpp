@@ -2,7 +2,16 @@
 #include "lib_dispatch.hpp"
 #include "tensors.hpp"
 
-// axpy - y = a*x
+namespace fm
+{
+// a non-matlab one-liner that had no better home - compute 2^arg
+inline int two_raised_to(int exponent)
+{
+  assert(exponent >= 0);
+  return 1 << exponent;
+}
+
+// axpy - y += a*x
 template<typename P, mem_type mem, mem_type omem>
 fk::vector<P, mem> &
 axpy(fk::vector<P, omem> const &x, fk::vector<P, mem> &y, P const alpha = 1.0)
@@ -11,7 +20,7 @@ axpy(fk::vector<P, omem> const &x, fk::vector<P, mem> &y, P const alpha = 1.0)
   int n    = x.size();
   int one  = 1;
   P alpha_ = alpha;
-  axpy(&n, &alpha_, x.data(), &one, y.data(), &one);
+  lib_dispatch::axpy(&n, &alpha_, x.data(), &one, y.data(), &one);
   return y;
 }
 
@@ -19,10 +28,10 @@ axpy(fk::vector<P, omem> const &x, fk::vector<P, mem> &y, P const alpha = 1.0)
 template<typename P, mem_type mem, mem_type omem>
 fk::vector<P, mem> &copy(fk::vector<P, omem> const &x, fk::vector<P, mem> &y)
 {
-  assert(x.size() == y.size());
+  assert(y.size() >= x.size());
   int n   = x.size();
   int one = 1;
-  copy(&n, x.data(), &one, y.data(), &one);
+  lib_dispatch::copy(&n, x.data(), &one, y.data(), &one);
   return y;
 }
 
@@ -33,7 +42,7 @@ fk::vector<P, mem> &scal(P const alpha, fk::vector<P, mem> &x)
   int one  = 1;
   int n    = x.size();
   P alpha_ = alpha;
-  scal(&n, &alpha_, x.data(), &one);
+  lib_dispatch::scal(&n, &alpha_, x.data(), &one);
   return x;
 }
 
@@ -58,8 +67,8 @@ gemv(fk::matrix<P, amem> const &A, fk::vector<P, xmem> const &x,
   int m             = A.nrows();
   int n             = A.ncols();
 
-  gemv(&transa, &m, &n, &alpha_, A.data(), &lda, x.data(), &one, &beta_,
-       y.data(), &one);
+  lib_dispatch::gemv(&transa, &m, &n, &alpha_, A.data(), &lda, x.data(), &one,
+                     &beta_, y.data(), &one);
 
   return y;
 }
@@ -92,8 +101,9 @@ gemm(fk::matrix<P, amem> const &A, fk::matrix<P, bmem> const &B,
   int n             = cols_B;
   int k             = rows_B;
 
-  gemm(&transa, &transb, &m, &n, &k, &alpha_, A.data(), &lda, B.data(), &ldb,
-       &beta_, C.data(), &ldc);
+  lib_dispatch::gemm(&transa, &transb, &m, &n, &k, &alpha_, A.data(), &lda,
+                     B.data(), &ldb, &beta_, C.data(), &ldc);
 
   return C;
 }
+} // namespace fm
