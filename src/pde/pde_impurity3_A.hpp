@@ -58,7 +58,7 @@ private:
   // everything is specified correctly
 
   static int constexpr num_dims_           = 3;
-  static int constexpr num_sources_        = 0;
+  static int constexpr num_sources_        = 1;
   static int constexpr num_terms_          = 8;
   static bool constexpr do_poisson_solve_  = false;
   static bool constexpr has_analytic_soln_ = false;
@@ -117,12 +117,13 @@ private:
 
     std::transform(x.begin(), x.end(), ret.begin(), [](auto const elem) {
       P const a = 1;
-      if (elem > 0.1 || elemc < 0.2)
+      if (elem > 0.1 && elem < 0.2)
       {
         return a;
       }
       else {
-        return 0.0;
+        P const b = 0;
+        return b;
       }
     });
 
@@ -547,36 +548,65 @@ private:
   static P t_g1(P const x, P const time = 0)
   {
     ignore(time);
-    return -1.0 / (tau * gamma(x));
+    return x;
+  }
+  
+  static P t_g2(P const x, P const time = 0)
+  {
+    ignore(time);
+    return -x;
+  }
+  static P t_g3(P const x, P const time = 0)
+  {
+    ignore(time);
+    return 1.0;
   }
 
   // 1. create partial_terms
-  inline static partial_term<P> const t_pterm =
-      partial_term<P>(coefficient_type::grad, t_g1, flux_type::central,
+  inline static partial_term<P> const t_pterm1 =
+      partial_term<P>(coefficient_type::mass, t_g1);
+  inline static partial_term<P> const t_pterm2 =
+      partial_term<P>(coefficient_type::mass, t_g2);
+  inline static partial_term<P> const t_pterm3 =
+      partial_term<P>(coefficient_type::grad, t_g3, flux_type::central,
                       boundary_condition::neumann, boundary_condition::neumann);
 
   // 2. combine partial terms into single dimension term
-  inline static term<P> const t_term_s =
+  inline static term<P> const t_term1 =
       term<P>(false,           // time-dependent
               fk::vector<P>(), // additional data vector
-              "R2_p",          // name
+              "t_p1",          // name
+              dim_p,           // owning dim
+              {t_pterm1});
+  inline static term<P> const t_term2 =
+      term<P>(false,           // time-dependent
+              fk::vector<P>(), // additional data vector
+              "t_p2",          // name
+              dim_z,           // owning dim
+              {t_pterm2});
+  inline static term<P> const t_term3 =
+      term<P>(false,           // time-dependent
+              fk::vector<P>(), // additional data vector
+              "t_p3",          // name
               dim_s,           // owning dim
-              {r2_pterm1});
+              {t_pterm3});
 
   // 3. combine single dimension terms into multi dimension term
-  inline static std::vector<term<P>> const termR2 = {r2_term_p, r2_term_z, I_};
+  inline static std::vector<term<P>> const termT = {t_term1, t_term2, t_term3};
 
   // collect all the terms
   inline static term_set<P> const terms_ = {termC1, termC2, termC3, termE1,
-                                            termE2, termR1, termR2};
+                                            termE2, termR1, termR2, termT};
 
   // --------------
   //
   // define sources
   //
   // --------------
-
-  inline static std::vector<source<P>> const sources_ = {};
+  static P source_0_time(P const time) { return 1.0; }
+  inline static source<P> const source0_ =
+      source<P>({initial_condition_p, initial_condition_z, initial_condition_s}, source_0_time);
+  inline static std::vector<source<P>> const sources_ = {source0_};
 
   // ------------------
   //
